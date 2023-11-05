@@ -1,107 +1,86 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <unistd.h>
-#include <stdlib.h>
-#include <time.h>
 
-#define BUFFER_SIZE 5
-#define NUM_READERS 3
-#define NUM_WRITERS 2
-
-int buffer[BUFFER_SIZE];
-sem_t empty, full;
-pthread_mutex_t mutex;
-int in = 0, out = 0;
-
-void print_buffer() {
-    printf("Buffer: [");
-    for (int i = 0; i < BUFFER_SIZE; i++) {
-        printf("%d", buffer[i]);
-        if (i < BUFFER_SIZE - 1) {
-            printf(", ");
-        }
-    }
-    printf("]\n");
-}
-
-void *reader(void *arg) {
-    int reader_id = *((int *)arg);
-    int data;
-    while (1) {
-        sem_wait(&full);
-        pthread_mutex_lock(&mutex);
-
-        data = buffer[out];
-        printf("Reader %d reads: %d\n", reader_id, data);
-        out = (out + 1) % BUFFER_SIZE;
-
-        pthread_mutex_unlock(&mutex);
-        sem_post(&empty);
-
-        print_buffer();
-
-        sleep(2);
-    }
-    pthread_exit(NULL);
-}
-
-void *writer(void *arg) {
-    int writer_id = *((int *)arg);
-    int data;
-    while (1) {
-        data = rand() % 100; // Generate a random integer
-
-        sem_wait(&empty);
-        pthread_mutex_lock(&mutex);
-
-        buffer[in] = data;
-        printf("Writer %d writes: %d\n", writer_id, data);
-        in = (in + 1) % BUFFER_SIZE;
-
-        pthread_mutex_unlock(&mutex);
-        sem_post(&full);
-
-        print_buffer();
-
-        sleep(5);
-    }
-    pthread_exit(NULL);
-}
+void *writer_thr(void *temp);
+void *reader_thr(void *temp);
+sem_t mutex;
+sem_t wrt;
+int readcount = 0, nwt, nrd;
 
 int main() {
-    srand(time(NULL)); // Seed the random number generator
-    pthread_t readers[NUM_READERS];
-    pthread_t writers[NUM_WRITERS];
-    int reader_ids[NUM_READERS];
-    int writer_ids[NUM_WRITERS];
+    long int i;
+    sem_init(&mutex, 0, 1);
+    sem_init(&wrt, 0, 1);
+    pthread_t reader[100], writer[100];
+    printf("\nEnter number of readers: ");
+    scanf("%d", &nrd);
+    printf("\nEnter number of writers: ");
+    scanf("%d", &nwt);
 
-    sem_init(&empty, 0, BUFFER_SIZE);
-    sem_init(&full, 0, 0);
-    pthread_mutex_init(&mutex, NULL);
-
-    for (int i = 0; i < NUM_READERS; i++) {
-        reader_ids[i] = i + 1;
-        pthread_create(&readers[i], NULL, reader, &reader_ids[i]);
+    for (i = 1; i <= nwt; i++) {
+        int *writer_id = malloc(sizeof(int));
+        *writer_id = i;
+        pthread_create(&writer[i], NULL, writer_thr, (void *)writer_id);
     }
 
-    for (int i = 0; i < NUM_WRITERS; i++) {
-        writer_ids[i] = i + 1;
-        pthread_create(&writers[i], NULL, writer, &writer_ids[i]);
+    for (i = 1; i <= nrd; i++) {
+        int *reader_id = malloc(sizeof(int));
+        *reader_id = i;
+        pthread_create(&reader[i], NULL, reader_thr, (void *)reader_id);
     }
 
-    for (int i = 0; i < NUM_READERS; i++) {
-        pthread_join(readers[i], NULL);
+    for (i = 1; i <= nwt; i++) {
+        pthread_join(writer[i], NULL);
     }
 
-    for (int i = 0; i < NUM_WRITERS; i++) {
-        pthread_join(writers[i], NULL);
+    for (i = 1; i <= nrd; i++) {
+        pthread_join(reader[i], NULL);
     }
 
-    sem_destroy(&empty);
-    sem_destroy(&full);
-    pthread_mutex_destroy(&mutex);
+    sem_destroy(&wrt);
+    sem_destroy(&mutex);
 
-    return 0;
+    pthread_exit(NULL); // Exit the main thread gracefully
 }
 
+void *reader_thr(void *temp) {
+    int *id_ptr = (int *)temp;
+    int id = *id_ptr;
+    free(id_ptr);
+
+    printf("\nReader %d is trying to enter the database for reading.", id);
+    sem_wait(&mutex);
+    readcount++;
+    if (readcount == 1)
+        sem_wait(&wrt);
+    sem_post(&mutex);
+
+    printf("\nReader %d is now reading in the database.", id);
+
+    sem_wait(&mutex);
+    readcount--;
+    if (readcount == 0)
+        sem_post(&wrt);
+    sem_post(&mutex);
+
+    printf("\nReader %d has left the database.\n", id);
+    sleep(3);
+    pthread_exit(NULL);
+}
+
+void *writer_thr(void *temp) {
+    int *id_ptr = (int *)temp;
+    int id = *id_ptr;
+    free(id_ptr);
+
+    printf("\nWriter %d is trying to enter the database for modifying data.", id);
+    sem_wait(&wrt);
+    printf("\nWriter %d is writing in the database.", id);
+    sleep(3);
+    printf("\nWriter %d is leaving the database.\n", id);
+    sem_post(&wrt);
+    pthread_exit(NULL);
+}
